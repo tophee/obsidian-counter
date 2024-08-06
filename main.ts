@@ -65,12 +65,53 @@ const DEFAULT_SETTINGS: CounterSettings = {
 	ignorePaths: []
 };
 
+function simpleIsEqual(a, b) {
+  // Check if a and b are the same type
+  if (typeof a !== typeof b) return false;
+  
+  // Check if a and b are arrays
+  if (Array.isArray(a) && Array.isArray(b)) {
+    // Check if a and b have the same length
+    if (a.length !== b.length) return false;
+    
+    // Compare each element of a and b
+    for (let i = 0; i < a.length; i++) {
+      if (!simpleIsEqual(a[i], b[i])) return false;
+    }
+    
+    return true;
+  }
+  
+  // Check if a and b are objects
+  if (typeof a === 'object' && typeof b === 'object') {
+    // Check if a and b have the same number of properties
+    if (Object.keys(a).length !== Object.keys(b).length) return false;
+    
+    // Compare each property of a and b
+    for (const key in a) {
+      if (!simpleIsEqual(a[key], b[key])) return false;
+    }
+    
+    return true;
+  }
+  
+  // Compare a and b directly
+  return a === b;
+}  
+
 export default class Counter extends Plugin {
 	settings: CounterSettings;
 
 	private last_update = { name: '', file_path: '' };
 	private last_update_time = new Date(0);
-
+  	async getYamlFrontMatter(file) {
+    	const content = await this.app.vault.read(file);
+   		if (!content) return false;
+    	const frontMatterRegex = /---\n([\s\S]*?)\n---\n/;
+    	const yamlLines = content.match(frontMatterRegex);
+    	if (!yamlLines) return false;
+    	return yamlLines;
+  	}
 	async onload() {
 		await this.loadSettings();
 
@@ -80,9 +121,34 @@ export default class Counter extends Plugin {
 		// 	this.app.workspace.on(trigger as "quit", async () => { this.updateCounter(trigger); })
 		// }
 		
-		this.app.workspace.on('file-open', () => { this.updateCounter('Open File'); })
+		// Register event listeners
+    	this.app.workspace.on("file-open", async (file) => {
+      		// Store a copy of the original YAML front matter in cached data
+      		const oldFrontmatter = await this.getYamlFrontMatter(file);
+      		// Check if cachedData is defined
+      		if (!file.cachedData) {
+        		file.cachedData = {};
+      		}
+    		file.cachedData.frontmatter = oldFrontmatter;
+      		// Update counter for "Open File" trigger 
+			this.updateCounter('Open File'); })
 		// this.app.workspace.on('active-leaf-change', () => { this.updateCounter('Active Leaf Change'); })
-		this.registerEvent(this.app.vault.on('modify', () => { this.updateCounter('Modify'); }));
+		this.registerEvent(this.app.vault.on("modify", async (file) => {
+			const oldFrontmatter = file.cachedData?.frontmatter ?? {};
+      		const newFrontmatter = await this.getYamlFrontMatter(file);
+       		// Compare old and new front matter to see if it has changed
+       		if (!simpleIsEqual(oldFrontmatter, newFrontmatter)) {
+         		console.log("YAML front matter has been modified! View count not updated.");
+         		// Check if cachedData is defined
+         		if (!file.cachedData) {
+            		file.cachedData = {};
+         		}
+         		// Update cached data with new front matter
+         		file.cachedData.frontmatter = newFrontmatter;
+        	return;   // Exit early since YAML front matter was modified.
+       		}
+			this.updateCounter('Modify'); 
+		}));
 		// this.registerEvent(this.app.vault.on('create', () => { this.updateCounter('Open File');}));
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
@@ -182,7 +248,17 @@ export default class Counter extends Plugin {
 
 		if (!yamlLines) return false;
 
-		const yaml = parseYaml(yamlLines[1]);
+		
+
+		let yaml;
+    	try {
+      	yaml = parseYaml(yamlLines[1]);
+    	} 	catch (error) {
+      		new import_obsidian.Notice("There is an issue with the formatting of the YAML front matter. Please make sure there is a space after each colon or double colon (says the Counter Plugin)", 20000);
+      		console.error(error);
+      		return false;
+    		}    
+    	if (!yaml) return false;
 		const metadataExists = metadata_name in yaml;
 
 		if (!metadataExists && !mode.create) {
@@ -190,41 +266,34 @@ export default class Counter extends Plugin {
 				new Notice('Counter\n' + 'Not Found Metadata key\n' + metadata_name);
 			return false;
 		}
-
-		const yamlExists = yamlLines != null;
-		if (!yamlExists && !mode.create) return false;
-
 		const editor = this.getEditor();
 		if (!editor) return false;
-
 		const cursorPos = editor.getCursor('head');
 		const lines = yamlLines ? yamlLines[1].split('\n') : [''];
 		const yamlLinesLen = firstLinePos + lines.length + 2;
 
 		if (cursorPos.line < yamlLinesLen) return false;
 
-		function updateFrontmatter(new_value: string): boolean {
-			
-			const lines = yamlLines ? yamlLines[1].split('\n') : [''];
-
-			if (metadataExists) {
-				let line_pos = -1;
-				// let line_end_pos = -1;
-
-				for (let i = 0, size = lines.length; i < size; i++) {
-					const line = lines[i];
-
-					if (line.indexOf(metadata_name + ':') != 0) continue;
-
-					line_pos = i;
-
-					const rangeFrom = { line: line_pos + 1, ch: 0 };
-					const rangeTo = { line: line_pos + 2, ch: 0 };
-
-					const new_line = metadata_name + ': ' + new_value + '\n';
-
-					if (!editor) return false;
-					
+    	function createFrontmatter(new_value) {
+      		const new_line = metadata_name + ": " + new_value + "\n";
+      		if (!editor) return false;
+      		editor.replaceRange(new_line, { line: yamlLinesLen -1, ch: 0 });
+      		return true;
+    	}
+    
+    	function updateFrontmatter(new_value) {
+      		const lines2 = yamlLines ? yamlLines[1].split("\n") : [""];
+      		if (metadataExists) {
+        		let line_pos = -1;
+        		for (let i = 0, size = lines2.length; i < size; i++) {
+          			const line = lines2[i];
+          			if (line.indexOf(metadata_name + ":") != 0 && line.indexOf(metadata_name + "::") != 0)
+            			continue;
+          			line_pos = i;
+          			const rangeFrom = { line: line_pos + 1, ch: 0 };
+          			const rangeTo = { line: line_pos + 2, ch: 0 };
+          			const new_line = line.startsWith(metadata_name + "::") ? metadata_name + ":: " + new_value + "\n" : metadata_name + ": " + new_value + "\n";
+          			if (!editor) return false;
 					editor.replaceRange(new_line, rangeFrom, rangeTo);
 					return true;
 				}
@@ -254,7 +323,39 @@ export default class Counter extends Plugin {
 		const current_value = yaml[metadata_name];
 
 		let sucsess = false;
-
+		// inserted
+        if (!metadataExists && mode.create) {
+      switch (mode.type) {
+        case "count_up":
+        case "count_down":
+          {
+            const new_value = 1;
+            sucsess = createFrontmatter(new_value.toString());
+            if (sucsess && mode.notify)
+              new import_obsidian.Notice("Counter\n" + metadata_name + ": +1");
+          }
+          break;
+        // ... (rest of the switch cases)
+        case "add_date":
+          {
+            const currentDate = new Date().toISOString().split("T")[0];
+            const new_value = "[" + currentDate + "]";
+            sucsess = createFrontmatter(new_value);
+            if (sucsess && mode.notify)
+              new import_obsidian.Notice("Counter\n" + metadata_name + ": +" + currentDate);
+          }
+          break;
+        case "word_count":
+          {
+            const new_value = this.countWords(content.substring(content.indexOf("\n---\n")));
+            sucsess = createFrontmatter(new_value.toString());
+            if (sucsess && mode.notify)
+              new import_obsidian.Notice("Counter\n" + metadata_name + ": " + new_value);
+          }
+          break;
+          }
+    	} else {
+    	// inserted end
 		switch (mode.type) {
 			case 'count_up':
 			case 'count_down': {
@@ -314,6 +415,9 @@ export default class Counter extends Plugin {
 
 			case 'word_count': {
 				if (current_value == null && !mode.auto) return false;
+				
+				const content = await this.app.vault.read(file);
+				if (!content) return false;
 
 				const current_count = current_value != null ? parseInt(current_value) : 0;
 				const new_value = this.countWords(content.substring(content.indexOf('\n---\n')));
@@ -495,7 +599,7 @@ class CounterSettingTab extends PluginSettingTab {
 				.setValue(counter_mode.name)
 				.onChange(async (value) => {
 					let res_value = value.trim().split(' ').join('_');
-					res_value = res_value.replace(/:/g, '');
+					res_value = res_value.replace(/:{2,}/g, ":");
 					counter_mode.name = res_value;
 					await this.plugin.saveSettings();
 					// this.display();
