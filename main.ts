@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownFileInfo, Notice, Plugin, PluginSettingTab, Setting, parseYaml } from 'obsidian';
+import { App, Editor, MarkdownFileInfo, Notice, Plugin, PluginSettingTab, Setting, parseYaml, debounce } from 'obsidian';
 
 interface CounterMode {
 	title: string,
@@ -104,6 +104,7 @@ export default class Counter extends Plugin {
 
 	private last_update = { name: '', file_path: '' };
 	private last_update_time = new Date(0);
+	private debouncedUpdateCounter: (trigger: string) => void;
   	async getYamlFrontMatter(file) {
     	const content = await this.app.vault.read(file);
    		if (!content) return false;
@@ -133,6 +134,12 @@ export default class Counter extends Plugin {
       		// Update counter for "Open File" trigger 
 			this.updateCounter('Open File'); })
 		// this.app.workspace.on('active-leaf-change', () => { this.updateCounter('Active Leaf Change'); })
+		
+		// Create a debounced version of updateCounter
+    	this.debouncedUpdateCounter = debounce((trigger: string) => {
+      		this.updateCounter(trigger);
+    	}, 3000); // 3000 milliseconds = 3 seconds
+		
 		this.registerEvent(this.app.vault.on("modify", async (file) => {
 			const oldFrontmatter = file.cachedData?.frontmatter ?? {};
       		const newFrontmatter = await this.getYamlFrontMatter(file);
@@ -147,7 +154,7 @@ export default class Counter extends Plugin {
          		file.cachedData.frontmatter = newFrontmatter;
         	return;   // Exit early since YAML front matter was modified.
        		}
-			this.updateCounter('Modify'); 
+			this.debouncedUpdateCounter('Modify'); 
 		}));
 		// this.registerEvent(this.app.vault.on('create', () => { this.updateCounter('Open File');}));
 
@@ -450,6 +457,11 @@ export default class Counter extends Plugin {
 		// 	const trigger = counterTriggerList[key];
 		// 	this.app.workspace.off(trigger as "quit", async () => { this.updateCounter(trigger); })
 		// }
+		
+		// Cancel any pending debounced updates
+    	if (this.debouncedUpdateCounter && typeof this.debouncedUpdateCounter.cancel === 'function') {
+      		this.debouncedUpdateCounter.cancel();
+    	}
 
 		this.app.workspace.off('file-open', () => { this.updateCounter('Open File'); })
 		// this.app.workspace.off('active-leaf-change', () => { this.updateCounter('Active Leaf Change'); })
