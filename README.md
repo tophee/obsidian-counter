@@ -1,6 +1,6 @@
 # Obsidian - Counter
 
-**This is my personal, slightly modified copy of the original [rmutt92/obsidian-counter](https://github.com/rmutt92/obsidian-counter) plugin. The main difference is that it doesn't count front-matter edits as edits.**
+**This is my personal, slightly modified copy of the original [rmutt92/obsidian-counter](https://github.com/rmutt92/obsidian-counter) plugin. The main difference is that it doesn't count front-matter edits as edits. Note that the plugin still uses the old format for lists ( `[item1], [item2]`, ... instead of the indented unordered list that is now default in Obsidian. This means that the plugin conflicts with any plugin that updates the yamls header to the new format, e.g. the [Update time on edit plugin](https://github.com/beaussan/update-time-on-edit-obsidian)**
 
 Counter is a simple Obsidian plugin that provides a counter of page views, editing dates, and word counts for metadata in YAML frontmatter.
 
