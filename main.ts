@@ -288,20 +288,34 @@ export default class Counter extends Plugin {
       		return true;
     	}
     
-    	function updateFrontmatter(new_value) {
-      		const lines2 = yamlLines ? yamlLines[1].split("\n") : [""];
-      		if (metadataExists) {
-        		let line_pos = -1;
-        		for (let i = 0, size = lines2.length; i < size; i++) {
-          			const line = lines2[i];
-          			if (line.indexOf(metadata_name + ":") != 0 && line.indexOf(metadata_name + "::") != 0)
-            			continue;
-          			line_pos = i;
-          			const rangeFrom = { line: line_pos + 1, ch: 0 };
-          			const rangeTo = { line: line_pos + 2, ch: 0 };
-          			const new_line = line.startsWith(metadata_name + "::") ? metadata_name + ":: " + new_value + "\n" : metadata_name + ": " + new_value + "\n";
-          			if (!editor) return false;
-					editor.replaceRange(new_line, rangeFrom, rangeTo);
+		function updateFrontmatter(new_value) {
+			const lines2 = yamlLines ? yamlLines[1].split("\n") : [""];
+			if (metadataExists) {
+				let line_pos = -1;
+				let line_end_pos = -1;
+				for (let i = 0, size = lines2.length; i < size; i++) {
+					const line = lines2[i];
+					if (line.indexOf(metadata_name + ":") != 0 && line.indexOf(metadata_name + "::") != 0)
+						continue;
+					line_pos = i;
+					// find the end of the list
+					for (let j = i + 1; j < size; j++) {
+						if (lines2[j].startsWith("  -")) {
+							line_end_pos = j;
+						} else {
+							break;
+						}
+					}
+					if (line_end_pos === -1) {
+						line_end_pos = line_pos;
+					}
+					const rangeFrom = { line: line_pos + 1, ch: 0 };
+					const rangeTo = { line: line_end_pos + 2, ch: 0 };
+					// remove the old lines
+					editor.replaceRange("", rangeFrom, rangeTo);
+					// add the new line
+					const new_line = metadata_name + ": " + new_value + "\n";
+					editor.replaceRange(new_line, rangeFrom);
 					return true;
 				}
 			}
@@ -328,8 +342,8 @@ export default class Counter extends Plugin {
 		}
 
 		const current_value = yaml[metadata_name];
-
 		let sucsess = false;
+
 		// inserted
         if (!metadataExists && mode.create) {
       switch (mode.type) {
@@ -346,7 +360,7 @@ export default class Counter extends Plugin {
         case "add_date":
           {
             const currentDate = new Date().toISOString().split("T")[0];
-            const new_value = "[" + currentDate + "]";
+            const new_value = "\"[[" + currentDate + "]]\"";
             sucsess = createFrontmatter(new_value);
             if (sucsess && mode.notify)
               new import_obsidian.Notice("Counter\n" + metadata_name + ": +" + currentDate);
@@ -444,6 +458,7 @@ export default class Counter extends Plugin {
 
 		return sucsess;
 	}
+}	
 
 	private countWords(text: string): number {
 		const wordRegex = /['’\w]+/g; // matches any apostrophes or word characters
